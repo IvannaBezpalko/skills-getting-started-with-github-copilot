@@ -21,10 +21,11 @@ def test_unregister_participant_from_activity():
     finally:
         activities[activity_name]["participants"] = original_participants
 =======
+import asyncio
 import copy
 
 import pytest
-from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from src.app import activities, app
 
@@ -37,30 +38,34 @@ def reset_activities():
     activities.update(copy.deepcopy(original))
 
 
-@pytest.fixture
-def client():
-    with TestClient(app, follow_redirects=False) as test_client:
-        yield test_client
+def make_request(method: str, path: str, **kwargs):
+    async def run_request():
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            request = getattr(client, method.lower())
+            return await request(path, **kwargs)
+
+    return asyncio.run(run_request())
 
 
-def test_root_redirects_to_static_index(client):
+def test_root_redirects_to_static_index():
     # Arrange
     # No special setup is required for this route.
 
     # Act
-    response = client.get("/")
+    response = make_request("get", "/")
 
     # Assert
     assert response.status_code == 307
     assert response.headers["location"] == "/static/index.html"
 
 
-def test_get_activities_returns_seed_data(client):
+def test_get_activities_returns_seed_data():
     # Arrange
     # The in-memory activity database is loaded by the app module.
 
     # Act
-    response = client.get("/activities")
+    response = make_request("get", "/activities")
 
     # Assert
     assert response.status_code == 200
@@ -69,12 +74,13 @@ def test_get_activities_returns_seed_data(client):
     assert payload["Chess Club"]["participants"][0] == "michael@mergington.edu"
 
 
-def test_signup_for_activity_adds_participant(client):
+def test_signup_for_activity_adds_participant():
     # Arrange
     email = "newstudent@mergington.edu"
 
     # Act
-    response = client.post(
+    response = make_request(
+        "post",
         "/activities/Chess Club/signup",
         params={"email": email},
     )
@@ -86,12 +92,13 @@ def test_signup_for_activity_adds_participant(client):
     assert email in activities["Chess Club"]["participants"]
 
 
-def test_signup_for_missing_activity_returns_404(client):
+def test_signup_for_missing_activity_returns_404():
     # Arrange
     email = "newstudent@mergington.edu"
 
     # Act
-    response = client.post(
+    response = make_request(
+        "post",
         "/activities/Unknown/signup",
         params={"email": email},
     )
